@@ -25,7 +25,7 @@ const LINKS: LinkItem[] = [
   { to: "/stats", label: "Stats", icon: BarChart2 },
   { to: "/badges", label: "Badges", icon: Award },
   { to: "/profile", label: "Profile", icon: User },
-  { to: "/sm2playground", label: "SM-2", icon: Sparkles },
+  { to: "/learn/in-progress", label: "Apprentissage", icon: Sparkles },
 ];
 
 export default function AppNav() {

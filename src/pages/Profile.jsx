@@ -82,34 +82,39 @@ export default function Profil() {
         });
 
         // Badges (récents d’abord)
-        const { data: ub } = await supabase
-          .from("user_badges")
-          .select("badge_code, created_at")
-          .eq("user_id", auth.user.id)
-          .order("created_at", { ascending: false })
-          .limit(6);
+        // Badges (récents d’abord)
+const { data: ub, error: ubErr } = await supabase
+  .from("user_badges")
+  .select("badge_code, earned_at")          // <-- le select ne contient QUE les colonnes
+  .eq("user_id", auth.user.id)               // <-- les filtres restent hors du select
+  .order("earned_at", { ascending: false }) // <-- tri propre
+  .limit(6);
 
-        if (!ub || ub.length === 0) {
-          setBadges([]);
-        } else {
-          // enrichir avec le catalogue
-          const codes = ub.map((x) => x.badge_code);
-          const { data: cats } = await supabase
-            .from("badges")
-            .select("code, title, description, color")
-            .in("code", codes);
+if (ubErr) throw ubErr;
 
-          const map = new Map((cats || []).map((c) => [c.code, c]));
-          setBadges(
-            ub.map((x) => ({
-              code: x.badge_code,
-              title: map.get(x.badge_code)?.title ?? x.badge_code,
-              description: map.get(x.badge_code)?.description ?? "",
-              color: map.get(x.badge_code)?.color ?? "gold",
-              awarded_at: x.created_at,
-            }))
-          );
-        }
+if (!ub || ub.length === 0) {
+  setBadges([]);
+} else {
+  const codes = ub.map(x => x.badge_code);
+  const { data: cats, error: catsErr } = await supabase
+    .from("badges")
+    .select("code, title, description, color")
+    .in("code", codes);
+
+  if (catsErr) throw catsErr;
+
+  const map = new Map((cats || []).map(c => [c.code, c]));
+  setBadges(
+    ub.map(x => ({
+      code: x.badge_code,
+      title: map.get(x.badge_code)?.title ?? x.badge_code,
+      description: map.get(x.badge_code)?.description ?? "",
+      color: map.get(x.badge_code)?.color ?? "gold",
+      awarded_at: x.earned_at,
+    }))
+  );
+}
+
       } catch (e) {
         console.error(e);
         setErr(e.message || "Erreur");
@@ -274,7 +279,7 @@ export default function Profil() {
                 >
                   <div className="text-sm font-semibold truncate" style={{ color: NAVY }}>{b.title}</div>
                   <div className="text-xs text-slate-500 mt-1">
-                    Obtenu le {new Date(b.awarded_at).toLocaleDateString()}
+                    Obtenu le {new Date(b.earned_at).toLocaleDateString()}
                   </div>
                 </motion.div>
               ))}
