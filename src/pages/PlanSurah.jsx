@@ -1,133 +1,228 @@
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
+// src/pages/PlanSurah.jsx
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { supabase } from "../lib/supabase";
 
-const ymd = (d=new Date()) => {
-  const p=n=>String(n).padStart(2,"0");
-  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+const PACE_OPTIONS = [
+  { value: "verses_per_day", label: "Versets / jour" },
+  { value: "pages_per_day", label: "Pages / jour" },
+  { value: "time_per_day", label: "Temps / jour (min)" },
+];
+
+function todayISO() {
+  const d = new Date();
+  // yyyy-mm-dd
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
 }
 
-export default function PlanSurah(){
-  const [sp] = useSearchParams();
-  const surah = Number(sp.get("surah") || 1);
-  const [stat, setStat] = useState(null);
-  const [pace, setPace] = useState(1);
-  const [start, setStart] = useState(ymd());
-  const [loading, setLoading] = useState(true);
+export default function PlanSurah() {
+  const [params] = useSearchParams();
   const navigate = useNavigate();
 
+  // ---- Query param "surah" -> nombre obligatoire
+  const surahId = useMemo(() => {
+    const v = Number(params.get("surah"));
+    return Number.isFinite(v) ? v : NaN;
+  }, [params]);
+
+  // ---- UI state
+  const [loading, setLoading] = useState(false);
+  const [surah, setSurah] = useState(null);
+  const [err, setErr] = useState("");
+
+  // Form
+  const [title, setTitle] = useState("");
+  const [paceType, setPaceType] = useState("verses_per_day");
+  const [paceValue, setPaceValue] = useState(5);
+  const [startDate, setStartDate] = useState(todayISO());
+
+  // ---- Charger la sourate (nom/ar, nb versets...)
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
+    let cancelled = false;
+
+    async function loadSurah() {
+      setErr("");
+      if (!Number.isFinite(surahId)) {
+        setErr("Identifiant de sourate invalide.");
+        return;
+      }
       const { data, error } = await supabase
-        .from("surah_stats")
-        .select("*").eq("surah_id", surah).maybeSingle();
-      if (!error) setStat(data);
-      setLoading(false);
-    };
-    load();
-  }, [surah]);
+        .from("surahs")
+        .select("id, name_en, name_ar, ayah_count")
+        .eq("id", surahId)
+        .single();
 
-  const days = useMemo(() => {
-    if (!stat) return 0;
-    return Math.ceil(stat.page_count / Math.max(pace,1));
-  }, [stat, pace]);
-
-  const preview = useMemo(() => {
-    if (!stat) return [];
-    const res = [];
-    let from = stat.first_page;
-    let d=0;
-    while (from <= stat.last_page){
-      d++;
-      const to = Math.min(from + pace - 1, stat.last_page);
-      res.push({ day: d, from, to, date: addDays(start, d-1) });
-      from = to + 1;
+      if (!cancelled) {
+        if (error) {
+          setErr(error.message || "Impossible de charger la sourate.");
+        } else {
+          setSurah(data);
+          // Pré-remplir le titre si vide
+          setTitle((t) =>
+            t?.trim()
+              ? t
+              : `Programme sourate ${data?.id ?? surahId}`
+          );
+        }
+      }
     }
-    return res;
-  }, [stat, pace, start]);
 
-  function addDays(iso, add){
-    const d = new Date(iso); d.setDate(d.getDate()+add);
-    return ymd(d);
+    loadSurah();
+    return () => {
+      cancelled = true;
+    };
+  }, [surahId]);
+
+  // ---- Validation locale simple
+  function validate() {
+    if (!Number.isFinite(surahId)) return "Identifiant de sourate invalide.";
+    if (!PACE_OPTIONS.some((o) => o.value === paceType))
+      return "Type de rythme invalide.";
+    const pace = Number(paceValue);
+    if (!Number.isFinite(pace) || pace <= 0) return "Valeur du rythme invalide.";
+    if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate))
+      return "Date de début invalide.";
+    return "";
   }
 
-  const createProgram = async () => {
-    if (!stat) return;
-    const { data, error } = await supabase.rpc("create_program_from_surah", {
-      p_surah: stat.surah_id,
-      p_pages_per_day: pace,
-      p_start: start
-    });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Programme créé !");
-      navigate("/"); // page Today
+  // ---- Soumission
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr("");
+
+    const v = validate();
+    if (v) {
+      setErr(v);
+      return;
     }
-  };
+
+    setLoading(true);
+    try {
+      // conversions finales
+      const payload = {
+        p_target_type: "surah",                 // text
+        p_surah_id: Number(surahId),           // integer
+        p_pace_type: String(paceType),         // text
+        p_pace_value: Number(paceValue),       // integer
+        p_start_date: String(startDate),       // date (string yyyy-mm-dd)
+        p_title: title?.trim() || null,        // text | null
+      };
+
+      // (Optionnel) debug
+       console.log("RPC payload:", payload);
+
+      const { data, error } = await supabase.rpc(
+        "create_program_from_surah",
+        payload
+      );
+
+      if (error) {
+        setErr(error.message || "Erreur lors de la création du programme.");
+        return;
+      }
+
+      // Rediriger vers Today (ou Stats), à toi d’ajuster
+      navigate("/today", { replace: true });
+    } catch (e2) {
+      setErr(e2.message || "Erreur inconnue.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-extrabold tracking-tight">Planifier la sourate</h1>
-        {stat && <Badge variant="secondary">#{stat.surah_id} · {stat.name_ar}</Badge>}
+    <div className="max-w-2xl mx-auto px-4 py-6">
+      <h1 className="text-4xl font-black tracking-tight mb-6">
+        Planifier la sourate
+      </h1>
+
+      {err ? (
+        <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-700">
+          {err}
+        </div>
+      ) : null}
+
+      <div className="mb-6 rounded-xl border bg-white/70 p-4 shadow-sm">
+        <div className="text-lg font-semibold">
+          {surah ? (
+            <>
+              {surah.name_en} <span className="text-gray-400">({surah.name_ar})</span>
+            </>
+          ) : (
+            "Chargement…"
+          )}
+        </div>
+        <div className="text-sm text-gray-500">
+          {surah?.ayah_count ?? "—"} versets
+        </div>
       </div>
 
-      {loading && <Card><CardContent className="py-8 text-center text-slate-500">Chargement…</CardContent></Card>}
+      <form onSubmit={handleSubmit} className="space-y-5">
+        <div className="space-y-2">
+          <label className="font-medium">Titre (optionnel)</label>
+          <input
+            type="text"
+            placeholder={`Programme sourate ${surahId || ""}`}
+            className="w-full rounded-lg border px-3 py-2"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
 
-      {stat && (
-        <>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Paramètres</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-3">
-              <div>
-                <label className="text-sm text-slate-600">Pages / jour</label>
-                <Input type="number" min={1} max={10} value={pace}
-                  onChange={e=>setPace(Math.max(1, Math.min(10, Number(e.target.value))))}/>
-              </div>
-              <div>
-                <label className="text-sm text-slate-600">Date de début</label>
-                <Input type="date" value={start} onChange={e=>setStart(e.target.value)} />
-              </div>
-              <div className="flex flex-col justify-end">
-                <div className="text-sm text-slate-600">
-                  {stat.page_count} pages • {days} jours estimés
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Aperçu</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2 max-h-[280px] overflow-auto">
-              {preview.map(row => (
-                <div key={row.day} className="flex items-center justify-between text-sm border-b py-1">
-                  <span>Jour {row.day}</span>
-                  <span>Pages {row.from}–{row.to}</span>
-                  <span className="text-slate-500">{row.date}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" onClick={()=>history.back()}>Annuler</Button>
-            <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={createProgram}>
-              Créer le programme
-            </Button>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <label className="font-medium">Date de début</label>
+            <input
+              type="date"
+              className="w-full rounded-lg border px-3 py-2"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
           </div>
-        </>
-      )}
+
+          <div className="space-y-2">
+            <label className="font-medium">Rythme</label>
+            <select
+              className="w-full rounded-lg border px-3 py-2"
+              value={paceType}
+              onChange={(e) => setPaceType(e.target.value)}
+            >
+              {PACE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label className="font-medium">
+            Valeur ({PACE_OPTIONS.find((o) => o.value === paceType)?.label})
+          </label>
+          <input
+            type="number"
+            className="w-full rounded-lg border px-3 py-2"
+            value={paceValue}
+            min={1}
+            step={1}
+            onChange={(e) => setPaceValue(Number(e.target.value))}
+          />
+        </div>
+
+        <div className="pt-2">
+          <button
+            type="submit"
+            disabled={loading}
+            className="inline-flex items-center rounded-lg bg-[#0f172a] px-4 py-2 font-semibold text-[#f1c40f] shadow-sm hover:opacity-95 disabled:opacity-60"
+          >
+            {loading ? "Création…" : "Commencer le programme"}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
