@@ -124,7 +124,7 @@ export default function PlanSurah() {
       }
 
       // Rediriger vers Today (ou Stats), à toi d’ajuster
-      navigate("/today", { replace: true });
+      navigate("/", { replace: true });
     } catch (e2) {
       setErr(e2.message || "Erreur inconnue.");
     } finally {

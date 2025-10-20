@@ -4,11 +4,12 @@ import Learn from './pages/Learn.jsx'
 import Review from './pages/Review.jsx'
 import Stats from './pages/Stats.jsx'
 import Profile from './pages/Profile.jsx'
+import SurahPicker from "@/components/SurahPicker";
 import Login from "./pages/Login.jsx"
 import Badges from "./pages/Badges.jsx";
 import SurahBaqara from "./pages/SurahBaqara.jsx"
 import ReviewSM2 from "./pages/ReviewSM2.jsx"
-import SurahPicker from "./pages/SurahPicker.jsx";
+
 import PlanSurah from "./pages/PlanSurah.jsx";
 import AppNav from "@/components/AppNav";
 import { Toaster } from "sonner"
@@ -35,6 +36,7 @@ return (
 <Route path="/profile" element={<Profile />} />
 <Route path="/" element={<Dashboard />} />
 <Route path="/learn/in-progress" element={<InProgress />} />
+<Route path="/learn/surahs" element={<SurahPicker />} />
 
 
 <Route path="/review" element={<ReviewSM2 />} />
